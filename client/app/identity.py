@@ -16,10 +16,9 @@ def _identity_path() -> Path:
     if override:
         return Path(override).expanduser()
 
-    system = platform.system()
-    if system == "Windows":
+    if platform.system() == "Windows":
         base = Path(os.environ.get("APPDATA", Path.home()))
-    elif system == "Darwin":
+    elif platform.system() == "Darwin":
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -40,19 +39,22 @@ def get_client_id(configured_id: str | None = None) -> str:
     try:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
-            client_id = str(data.get("client_id", "")).strip()
-            if client_id:
-                return client_id
+            if data.get("version") == IDENTITY_VERSION:
+                client_id = str(data.get("client_id", "")).strip()
+                if 1 <= len(client_id) <= 128:
+                    return client_id
     except (OSError, ValueError, TypeError):
         pass
 
     client_id = _make_identity()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        temp_path.write_text(
             json.dumps({"version": IDENTITY_VERSION, "client_id": client_id}, indent=2),
             encoding="utf-8",
         )
+        temp_path.replace(path)
     except OSError:
         pass
     return client_id
