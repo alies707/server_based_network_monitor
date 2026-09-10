@@ -1,4 +1,5 @@
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,6 +54,21 @@ def test_client_heartbeat_and_dashboard_snapshot():
     assert monitored["total_traffic_bytes"] == 3000
     assert monitored["online"] is True
     assert monitored["public_ip"]
+
+
+def test_live_traffic_rate_is_calculated():
+    with TestClient(main.app) as client:
+        with client.websocket_connect("/ws/client") as client_ws:
+            send_heartbeat(client_ws, "RATE-01", 1_000, 2_000)
+            time.sleep(0.02)
+            send_heartbeat(client_ws, "RATE-01", 11_000, 7_000)
+
+        with client.websocket_connect("/ws/dashboard") as dashboard_ws:
+            payload = dashboard_ws.receive_json()
+
+    monitored = payload["clients"][0]
+    assert monitored["download_bps"] > 0
+    assert monitored["upload_bps"] > 0
 
 
 def test_cumulative_traffic_handles_counter_reset():
