@@ -1,31 +1,31 @@
 # Server Based Network Monitor
 
-A lightweight Python client/server network monitor.
+A Python-only client/server network monitoring system.
 
 ## Features
 
-- Python client agent for Windows, Linux, and macOS
 - Live download/upload rate per client
-- Human-readable units (bps, Kbps, Mbps, Gbps)
+- Human-readable network rates (bps, Kbps, Mbps, Gbps)
 - Public IP observed by the server
 - Total download/upload/traffic per client
 - Online/offline state
 - Browser dashboard updated over WebSocket
 - SQLite persistence for cumulative counters
-- Automatic client reconnect
-- Persistent client identity
-- Optional shared-token authentication
-- Monitoring-only design with no remote command execution
+- Automatic Python client reconnect
+- Stable client identity without manually assigning an ID
+- Windows, Linux and macOS client support through `psutil`
+- Python 3.11, 3.12 and 3.13 CI coverage
+- Monitoring-only design: no remote command execution
 
 ## Architecture
 
 ```text
 Python Client Agent -> WebSocket -> FastAPI Server -> SQLite
-                                         |
-                                         +-> Browser Dashboard
+                                      |
+                                      +-> Browser Dashboard
 ```
 
-The client reports cumulative RX/TX byte counters. The server calculates the live rate from counter deltas. The server also records the public source IP of the WebSocket connection, so the client does not need a third-party IP service.
+The client reports cumulative RX/TX byte counters. The server calculates live rates from counter deltas and persists cumulative traffic. The server records the source IP of the WebSocket connection as the client's observed public/source IP.
 
 ## Server
 
@@ -50,10 +50,6 @@ Optional environment variables:
 
 ## Python Client
 
-Requirements: Python 3.10+.
-
-Install dependencies:
-
 ```bash
 cd client
 python -m venv .venv
@@ -64,32 +60,40 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run against a server:
+Start the client:
 
 ```bash
 python -m app.main --server ws://SERVER_IP:8000/ws/client
 ```
 
-With an explicit client ID and token:
+With authentication:
 
 ```bash
-python -m app.main --server ws://SERVER_IP:8000/ws/client --client-id PC-01 --token SECRET
+python -m app.main --server ws://SERVER_IP:8000/ws/client --token YOUR_TOKEN
 ```
 
-The client ID is persistent when it is not explicitly supplied. The identity is stored in the user's application configuration directory. It can be overridden with `NETWORK_MONITOR_IDENTITY_FILE`.
-
-Useful options:
+Optional settings:
 
 ```text
---server SERVER_URL
---client-id CLIENT_ID
---token TOKEN
---interval SECONDS
---reconnect-delay SECONDS
---log-level LEVEL
+--client-id ID
+--interval 1
+--reconnect-delay 3
+--log-level INFO
 ```
 
-The client uses `psutil` to collect network interface counters. Loopback and common virtual/tunnel interfaces are excluded to reduce double counting. The server remains the source of truth for live rates and cumulative totals.
+The client stores its generated identity in the platform's application configuration directory. `NETWORK_MONITOR_IDENTITY_FILE` can override the identity file location. A manually supplied `--client-id` takes precedence.
+
+## Configuration via environment variables
+
+```text
+NETWORK_MONITOR_SERVER
+NETWORK_MONITOR_CLIENT_ID
+NETWORK_MONITOR_TOKEN
+NETWORK_MONITOR_INTERVAL
+NETWORK_MONITOR_RECONNECT_DELAY
+NETWORK_MONITOR_LOG_LEVEL
+NETWORK_MONITOR_IDENTITY_FILE
+```
 
 ## Protocol
 
@@ -106,49 +110,36 @@ Client -> server:
 }
 ```
 
-Server -> browser:
+The server uses its own receive time for live-rate calculations, so client clock differences do not affect bandwidth measurements.
 
-```json
-{
-  "clients": [
-    {
-      "client_id": "CLIENT-01",
-      "public_ip": "203.0.113.10",
-      "download_bps": 12345678,
-      "upload_bps": 1234567,
-      "total_download_bytes": 123456789,
-      "total_upload_bytes": 4567890,
-      "total_traffic_bytes": 128024679,
-      "online": true
-    }
-  ]
-}
-```
+If the current counter is lower than the previously stored counter, the server treats it as a counter reset/reboot and adds the new counter value rather than producing a negative delta.
 
 ## Testing
 
-Run server tests:
+Server tests:
 
 ```bash
 PYTHONPATH=server python -m pytest -q server/tests
 ```
 
-Run client tests:
+Client tests:
 
 ```bash
 python -m pytest -q client/tests
 ```
 
-The GitHub Actions workflow runs both test suites and compiles the Python client package.
+Compile check:
 
-## Counter reset behavior
+```bash
+python -m compileall -q client/app server/app
+```
 
-If a client counter becomes smaller than its previous value, the server treats it as a counter reset/reboot and adds the new counter value to the persisted total. This prevents a Windows/Linux restart from destroying the cumulative traffic history.
+GitHub Actions runs server tests and the Python client test suite on Python 3.11, 3.12 and 3.13.
 
-## Security
+## Security and production notes
 
-For production use, prefer `wss://` behind TLS and configure `NETWORK_MONITOR_TOKEN`. The current token is passed as a URL query parameter for compatibility with the existing server endpoint; avoid exposing URLs containing tokens in logs.
-
-## Scope
-
-The current release is monitoring-only. It deliberately does not execute remote commands or modify network configuration. That keeps the first version small, auditable, and much harder to accidentally turn into a distributed disaster.
+- Use `wss://` behind TLS in production.
+- Set `NETWORK_MONITOR_TOKEN` outside development.
+- The current token transport uses a query parameter for compatibility with the existing server protocol. For high-security deployments, move authentication into the WebSocket handshake/header or an initial authenticated message.
+- If the server is behind a reverse proxy, configure trusted proxy handling before treating forwarded headers as the client's public IP.
+- The current release is monitoring-only and deliberately does not execute remote commands or modify network configuration.
