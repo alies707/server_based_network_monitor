@@ -7,7 +7,8 @@ import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import websockets
-from websockets.asyncio.client import ClientConnection, connect
+from websockets.asyncio.client import connect
+from websockets.exceptions import WebSocketException
 
 from .network import NetworkCounters, read_network_counters_with_retry
 
@@ -48,9 +49,11 @@ class MonitorClient:
             separators=(",", ":"),
         )
 
-    async def _send_loop(self, websocket: ClientConnection) -> None:
+    async def _send_loop(self, websocket) -> None:
         while not self._stop_event.is_set():
-            counters = read_network_counters_with_retry()
+            # psutil is synchronous. Run it in a worker thread so a slow OS
+            # network-counter query cannot block the heartbeat/WebSocket loop.
+            counters = await asyncio.to_thread(read_network_counters_with_retry)
             await websocket.send(self._payload(self.client_id, counters))
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval)
@@ -74,7 +77,7 @@ class MonitorClient:
                     await self._send_loop(websocket)
             except asyncio.CancelledError:
                 raise
-            except (OSError, websockets.WebSocketException, asyncio.TimeoutError) as exc:
+            except (OSError, WebSocketException, asyncio.TimeoutError) as exc:
                 logger.warning("Connection lost: %s", exc)
             except Exception:
                 logger.exception("Unexpected client error")
