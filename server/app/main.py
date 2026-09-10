@@ -255,7 +255,7 @@ async def client_socket(websocket: WebSocket):
                 elif rx_bytes >= client["last_rx_bytes"]:
                     client["total_download_bytes"] += rx_bytes - client["last_rx_bytes"]
                 else:
-                    // Counter reset/reboot: count the new counter value from zero.
+                    # Counter reset/reboot: count the new counter value from zero.
                     client["total_download_bytes"] += rx_bytes
 
                 if client["last_tx_bytes"] is None:
@@ -263,7 +263,7 @@ async def client_socket(websocket: WebSocket):
                 elif tx_bytes >= client["last_tx_bytes"]:
                     client["total_upload_bytes"] += tx_bytes - client["last_tx_bytes"]
                 else:
-                    // Counter reset/reboot: count the new counter value from zero.
+                    # Counter reset/reboot: count the new counter value from zero.
                     client["total_upload_bytes"] += tx_bytes
 
                 client["last_rx_bytes"] = rx_bytes
