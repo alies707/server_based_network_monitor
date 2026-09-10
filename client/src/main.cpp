@@ -3,7 +3,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 
 #include <chrono>
-#include <cstdlib>
+#include <cctype>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -16,6 +16,22 @@ static std::string json_escape(const std::string& value) {
         if (c == '\\') result += "\\\\";
         else if (c == '"') result += "\\\"";
         else result += c;
+    }
+    return result;
+}
+
+static std::string url_encode(const std::string& value) {
+    static constexpr char hex[] = "0123456789ABCDEF";
+    std::string result;
+    result.reserve(value.size() * 3);
+    for (unsigned char c : value) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            result += static_cast<char>(c);
+        } else {
+            result += '%';
+            result += hex[c >> 4];
+            result += hex[c & 0x0F];
+        }
     }
     return result;
 }
@@ -50,7 +66,7 @@ int main(int argc, char* argv[]) {
         ix::WebSocket web_socket;
         std::string connection_url = url;
         if (!token.empty()) {
-            connection_url += (connection_url.find('?') == std::string::npos ? "?token=" : "&token=") + token;
+            connection_url += (connection_url.find('?') == std::string::npos ? "?token=" : "&token=") + url_encode(token);
         }
         web_socket.setUrl(connection_url);
         web_socket.setPingInterval(15);
