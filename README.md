@@ -1,89 +1,174 @@
 # Server Based Network Monitor
 
-A Python-only client/server network monitoring system.
+A Python-only Client/Server network monitoring system for live bandwidth and traffic monitoring.
+
+**فارسی:** [راهنمای فارسی](README.fa.md)
 
 ## Features
 
-- Live download/upload rate per client
-- Human-readable network rates (bps, Kbps, Mbps, Gbps)
-- Public IP observed by the server
-- Total download/upload/traffic per client
-- Online/offline state
-- Browser dashboard updated over WebSocket
-- SQLite persistence for cumulative counters
-- Automatic Python client reconnect
+- Live download and upload rate per client
+- Human-readable rates: bps, Kbps, Mbps and Gbps
+- Public/source IP observed by the server
+- Total download, upload and combined traffic per client
+- Online/offline detection
+- RTL Persian web dashboard
+- Live browser updates through WebSocket
+- SQLite persistence for cumulative traffic
+- Automatic client reconnect
 - Stable client identity without manually assigning an ID
 - Windows, Linux and macOS client support through `psutil`
+- Input and counter validation
 - Python 3.11, 3.12 and 3.13 CI coverage
-- Monitoring-only design: no remote command execution
+- Monitoring-only by design: no remote command execution
 
 ## Architecture
 
 ```text
-Python Client Agent -> WebSocket -> FastAPI Server -> SQLite
-                                      |
-                                      +-> Browser Dashboard
+┌─────────────────────┐
+│    Python Client    │
+│                     │
+│  Network Counters   │
+│      RX / TX        │
+└──────────┬──────────┘
+           │ WebSocket
+           ▼
+┌─────────────────────┐
+│   Python FastAPI    │
+│       Server        │
+│                     │
+│ Live Rate           │
+│ Public IP           │
+│ Client Status       │
+│ SQLite Persistence  │
+└──────────┬──────────┘
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+  SQLite     Dashboard
 ```
 
-The client reports cumulative RX/TX byte counters. The server calculates live rates from counter deltas and persists cumulative traffic. The server records the source IP of the WebSocket connection as the client's observed public/source IP.
+The client reports cumulative RX/TX byte counters. The server calculates live rates from counter deltas and stores cumulative traffic in SQLite. The server records the source address of the WebSocket connection as the client's observed source/public IP.
 
-## Server
+## Requirements
+
+- Python 3.11+
+- Network connectivity between clients and the server
+- TLS/WSS recommended for production
+
+## Repository Structure
+
+```text
+server_based_network_monitor/
+├── client/
+│   ├── app/
+│   │   ├── config.py
+│   │   ├── identity.py
+│   │   ├── main.py
+│   │   ├── network.py
+│   │   └── websocket_client.py
+│   ├── tests/
+│   ├── requirements.txt
+│   └── config.example.json
+├── server/
+│   ├── app/
+│   ├── tests/
+│   └── requirements.txt
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── README.md
+└── README.fa.md
+```
+
+## Server Installation
+
+### Linux / macOS
 
 ```bash
 cd server
-python -m venv .venv
-# Linux/macOS
+python3 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell
-# .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
+PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Windows PowerShell
+
+```powershell
+cd server
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:PYTHONPATH="."
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://SERVER_IP:8000/` in a browser.
+Open:
 
-Optional environment variables:
+```text
+http://SERVER_IP:8000/
+```
 
-- `NETWORK_MONITOR_TOKEN`: shared token required by clients. If unset, authentication is disabled for development.
-- `NETWORK_MONITOR_DB`: SQLite database path. Defaults to `data/network_monitor.db`.
-- `NETWORK_MONITOR_STALE_SECONDS`: seconds without a heartbeat before a client is offline. Defaults to `5`.
+Example:
 
-## Python Client
+```text
+http://192.168.1.100:8000/
+```
+
+## Client Installation
+
+### Linux / macOS
 
 ```bash
 cd client
-python -m venv .venv
-# Linux/macOS
+python3 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell
-# .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
+python -m app.main --server ws://192.168.1.100:8000/ws/client
 ```
 
-Start the client:
+### Windows PowerShell
 
-```bash
-python -m app.main --server ws://SERVER_IP:8000/ws/client
+```powershell
+cd client
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m app.main --server ws://192.168.1.100:8000/ws/client
 ```
 
-With authentication:
+Replace `192.168.1.100` with the actual server IP.
 
-```bash
-python -m app.main --server ws://SERVER_IP:8000/ws/client --token YOUR_TOKEN
-```
+## Authentication
 
-Optional settings:
+Set a shared token on the server:
 
 ```text
---client-id ID
---interval 1
---reconnect-delay 3
---log-level INFO
+NETWORK_MONITOR_TOKEN=YOUR_STRONG_TOKEN
 ```
 
-The client stores its generated identity in the platform's application configuration directory. `NETWORK_MONITOR_IDENTITY_FILE` can override the identity file location. A manually supplied `--client-id` takes precedence.
+Run the client with the same token:
 
-## Configuration via environment variables
+```bash
+python -m app.main --server ws://192.168.1.100:8000/ws/client --token YOUR_STRONG_TOKEN
+```
+
+If the server token is unset, authentication is disabled for development.
+
+## Configuration
+
+Client command-line options:
+
+```text
+--server SERVER_URL
+--client-id CLIENT_ID
+--token TOKEN
+--interval SECONDS
+--reconnect-delay SECONDS
+--log-level LEVEL
+```
+
+Environment variables:
 
 ```text
 NETWORK_MONITOR_SERVER
@@ -95,9 +180,11 @@ NETWORK_MONITOR_LOG_LEVEL
 NETWORK_MONITOR_IDENTITY_FILE
 ```
 
+When no client ID is supplied, the client creates and persists a stable identity. `NETWORK_MONITOR_IDENTITY_FILE` can override the identity-file location.
+
 ## Protocol
 
-Client -> server:
+Client heartbeat example:
 
 ```json
 {
@@ -110,36 +197,58 @@ Client -> server:
 }
 ```
 
-The server uses its own receive time for live-rate calculations, so client clock differences do not affect bandwidth measurements.
+The server uses its own receive time for rate calculations, so differences between client and server clocks do not affect live bandwidth measurements.
 
-If the current counter is lower than the previously stored counter, the server treats it as a counter reset/reboot and adds the new counter value rather than producing a negative delta.
+## Counter Reset Handling
+
+If a new RX/TX counter is lower than the previous counter, the server treats this as a counter reset or system reboot and adds the new counter value instead of generating a negative delta.
+
+## Public IP
+
+The server records the source address of the WebSocket connection. If the server is behind a reverse proxy, trusted proxy handling must be configured before forwarded headers are used to identify the client IP.
 
 ## Testing
 
-Server tests:
+Run server tests:
 
 ```bash
 PYTHONPATH=server python -m pytest -q server/tests
 ```
 
-Client tests:
+Run client tests:
 
 ```bash
 python -m pytest -q client/tests
 ```
 
-Compile check:
+Run a syntax/compile check:
 
 ```bash
 python -m compileall -q client/app server/app
 ```
 
-GitHub Actions runs server tests and the Python client test suite on Python 3.11, 3.12 and 3.13.
+GitHub Actions runs the server tests and the client test suite. The client is tested on Python 3.11, 3.12 and 3.13.
 
-## Security and production notes
+## Quick End-to-End Test
 
-- Use `wss://` behind TLS in production.
-- Set `NETWORK_MONITOR_TOKEN` outside development.
-- The current token transport uses a query parameter for compatibility with the existing server protocol. For high-security deployments, move authentication into the WebSocket handshake/header or an initial authenticated message.
-- If the server is behind a reverse proxy, configure trusted proxy handling before treating forwarded headers as the client's public IP.
-- The current release is monitoring-only and deliberately does not execute remote commands or modify network configuration.
+1. Start the server.
+2. Open `http://SERVER_IP:8000/` in a browser.
+3. Start one Python client.
+4. Confirm that the client becomes Online.
+5. Download a large file from the client and verify the Download rate.
+6. Upload a large file and verify the Upload rate.
+7. Stop the client and verify Offline detection.
+8. Start the client again and verify that cumulative traffic remains stored.
+
+## Security and Production Notes
+
+- Use `wss://` with TLS in production.
+- Set a strong authentication token.
+- Do not expose the server directly to the Internet without appropriate firewall and reverse-proxy controls.
+- Configure trusted proxy handling when using a reverse proxy.
+- The current token transport uses a query parameter for compatibility with the existing protocol. A future hardened deployment should move authentication into the WebSocket handshake/header or an authenticated first message.
+- The current release is monitoring-only and intentionally does not execute remote commands or modify client network configuration.
+
+## License
+
+No license has been selected yet. Add an appropriate open-source or proprietary license before distributing the project.
