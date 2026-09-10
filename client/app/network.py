@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import platform
 import time
 from dataclasses import dataclass
-from typing import Any
 
 import psutil
 
@@ -14,43 +12,23 @@ class NetworkCounters:
     tx_bytes: int
 
 
-VIRTUAL_PREFIXES = (
-    "lo",
-    "docker",
-    "veth",
-    "br-",
-    "virbr",
-    "tun",
-    "tap",
-    "vmnet",
-    "vboxnet",
-    "zt",
-    "tailscale",
-)
-
-
-def _is_candidate(name: str, stats: Any) -> bool:
-    lower = name.lower()
-    if lower.startswith(VIRTUAL_PREFIXES):
-        return False
-    if getattr(stats, "isup", False) is False:
-        return False
-
-    if platform.system() == "Windows":
-        virtual_markers = ("virtual", "loopback", "hyper-v", "vethernet", "vpn", "tunnel")
-        return not any(marker in lower for marker in virtual_markers)
-    return True
-
-
 def read_network_counters() -> NetworkCounters:
-    pernic = psutil.net_io_counters(pernic=True, nowrap=True) or {}
-    rx = 0
-    tx = 0
-    for name, counters in pernic.items():
-        if _is_candidate(name, counters):
-            rx += int(counters.bytes_recv)
-            tx += int(counters.bytes_sent)
-    return NetworkCounters(rx_bytes=rx, tx_bytes=tx)
+    """Return cumulative receive/transmit byte counters for the whole client.
+
+    The previous implementation summed only interfaces that passed a heuristic
+    virtual-interface filter. On Windows and on some virtualized/network-driver
+    setups, that filter can reject the real adapter, causing both counters to
+    remain zero even while traffic is flowing. psutil's aggregate counters are
+    maintained by the OS and are a better source for a client-wide traffic
+    monitor.
+    """
+    counters = psutil.net_io_counters(pernic=False, nowrap=True)
+    if counters is None:
+        return NetworkCounters(0, 0)
+    return NetworkCounters(
+        rx_bytes=max(0, int(counters.bytes_recv)),
+        tx_bytes=max(0, int(counters.bytes_sent)),
+    )
 
 
 def read_network_counters_with_retry(retries: int = 3) -> NetworkCounters:
