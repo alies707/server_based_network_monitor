@@ -14,6 +14,20 @@ def isolated_database(tmp_path):
     main.clients.clear()
 
 
+def send_heartbeat(client_ws, client_id, rx_bytes, tx_bytes):
+    client_ws.send_text(
+        json.dumps(
+            {
+                "type": "heartbeat",
+                "client_id": client_id,
+                "rx_bytes": rx_bytes,
+                "tx_bytes": tx_bytes,
+                "timestamp": 1760000000,
+            }
+        )
+    )
+
+
 def test_health_endpoint():
     with TestClient(main.app) as client:
         response = client.get("/health")
@@ -26,17 +40,7 @@ def test_health_endpoint():
 def test_client_heartbeat_and_dashboard_snapshot():
     with TestClient(main.app) as client:
         with client.websocket_connect("/ws/client") as client_ws:
-            client_ws.send_text(
-                json.dumps(
-                    {
-                        "type": "heartbeat",
-                        "client_id": "TEST-01",
-                        "rx_bytes": 1000,
-                        "tx_bytes": 2000,
-                        "timestamp": 1760000000,
-                    }
-                )
-            )
+            send_heartbeat(client_ws, "TEST-01", 1000, 2000)
 
         with client.websocket_connect("/ws/dashboard") as dashboard_ws:
             payload = dashboard_ws.receive_json()
@@ -51,19 +55,26 @@ def test_client_heartbeat_and_dashboard_snapshot():
     assert monitored["public_ip"]
 
 
+def test_cumulative_traffic_handles_counter_reset():
+    with TestClient(main.app) as client:
+        with client.websocket_connect("/ws/client") as client_ws:
+            send_heartbeat(client_ws, "RESET-01", 1000, 2000)
+            send_heartbeat(client_ws, "RESET-01", 1500, 2500)
+            send_heartbeat(client_ws, "RESET-01", 200, 300)
+            send_heartbeat(client_ws, "RESET-01", 500, 700)
+
+        with client.websocket_connect("/ws/dashboard") as dashboard_ws:
+            payload = dashboard_ws.receive_json()
+
+    monitored = payload["clients"][0]
+    assert monitored["total_download_bytes"] == 1500 + 200 + 300
+    assert monitored["total_upload_bytes"] == 2500 + 300 + 400
+
+
 def test_invalid_counters_close_client_socket():
     with TestClient(main.app) as client:
         with client.websocket_connect("/ws/client") as client_ws:
-            client_ws.send_text(
-                json.dumps(
-                    {
-                        "type": "heartbeat",
-                        "client_id": "TEST-NEGATIVE",
-                        "rx_bytes": -1,
-                        "tx_bytes": 0,
-                    }
-                )
-            )
+            send_heartbeat(client_ws, "TEST-NEGATIVE", -1, 0)
             message = client_ws.receive()
 
     assert message["type"] == "websocket.close"
