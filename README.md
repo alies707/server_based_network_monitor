@@ -1,9 +1,10 @@
 # Server Based Network Monitor
 
-A lightweight client/server network monitor.
+A lightweight Python client/server network monitor.
 
 ## Features
 
+- Python client agent for Windows, Linux, and macOS
 - Live download/upload rate per client
 - Human-readable units (bps, Kbps, Mbps, Gbps)
 - Public IP observed by the server
@@ -11,15 +12,17 @@ A lightweight client/server network monitor.
 - Online/offline state
 - Browser dashboard updated over WebSocket
 - SQLite persistence for cumulative counters
-- C++17 client agent for Windows and Linux
-- Python FastAPI server
+- Automatic client reconnect
+- Persistent client identity
+- Optional shared-token authentication
+- Monitoring-only design with no remote command execution
 
 ## Architecture
 
 ```text
-C++ Client Agent -> WebSocket -> FastAPI Server -> SQLite
-                                      |
-                                      +-> Browser Dashboard
+Python Client Agent -> WebSocket -> FastAPI Server -> SQLite
+                                         |
+                                         +-> Browser Dashboard
 ```
 
 The client reports cumulative RX/TX byte counters. The server calculates the live rate from counter deltas. The server also records the public source IP of the WebSocket connection, so the client does not need a third-party IP service.
@@ -45,22 +48,48 @@ Optional environment variables:
 - `NETWORK_MONITOR_DB`: SQLite database path. Defaults to `data/network_monitor.db`.
 - `NETWORK_MONITOR_STALE_SECONDS`: seconds without a heartbeat before a client is offline. Defaults to `5`.
 
-## Client
+## Python Client
 
-The client uses C++17 and CMake. It collects interface counters and sends a heartbeat every second.
+Requirements: Python 3.10+.
+
+Install dependencies:
 
 ```bash
-cmake -S client -B client/build
-cmake --build client/build --config Release
+cd client
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows PowerShell
+# .venv\\Scripts\\Activate.ps1
+pip install -r requirements.txt
 ```
 
-Run with:
+Run against a server:
+
+```bash
+python -m app.main --server ws://SERVER_IP:8000/ws/client
+```
+
+With an explicit client ID and token:
+
+```bash
+python -m app.main --server ws://SERVER_IP:8000/ws/client --client-id PC-01 --token SECRET
+```
+
+The client ID is persistent when it is not explicitly supplied. The identity is stored in the user's application configuration directory. It can be overridden with `NETWORK_MONITOR_IDENTITY_FILE`.
+
+Useful options:
 
 ```text
-network-monitor-client ws://SERVER_IP:8000/ws/client CLIENT-01 TOKEN
+--server SERVER_URL
+--client-id CLIENT_ID
+--token TOKEN
+--interval SECONDS
+--reconnect-delay SECONDS
+--log-level LEVEL
 ```
 
-On Linux, interface counters are read from `/sys/class/net/*/statistics`. On Windows, the implementation uses `GetIfTable2` from IP Helper API.
+The client uses `psutil` to collect network interface counters. Loopback and common virtual/tunnel interfaces are excluded to reduce double counting. The server remains the source of truth for live rates and cumulative totals.
 
 ## Protocol
 
@@ -69,6 +98,7 @@ Client -> server:
 ```json
 {
   "type": "heartbeat",
+  "protocol_version": 1,
   "client_id": "CLIENT-01",
   "rx_bytes": 123456789,
   "tx_bytes": 4567890,
@@ -95,6 +125,30 @@ Server -> browser:
 }
 ```
 
-## Notes
+## Testing
+
+Run server tests:
+
+```bash
+PYTHONPATH=server python -m pytest -q server/tests
+```
+
+Run client tests:
+
+```bash
+python -m pytest -q client/tests
+```
+
+The GitHub Actions workflow runs both test suites and compiles the Python client package.
+
+## Counter reset behavior
+
+If a client counter becomes smaller than its previous value, the server treats it as a counter reset/reboot and adds the new counter value to the persisted total. This prevents a Windows/Linux restart from destroying the cumulative traffic history.
+
+## Security
+
+For production use, prefer `wss://` behind TLS and configure `NETWORK_MONITOR_TOKEN`. The current token is passed as a URL query parameter for compatibility with the existing server endpoint; avoid exposing URLs containing tokens in logs.
+
+## Scope
 
 The current release is monitoring-only. It deliberately does not execute remote commands or modify network configuration. That keeps the first version small, auditable, and much harder to accidentally turn into a distributed disaster.
