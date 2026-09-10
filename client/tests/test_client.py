@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -53,3 +54,24 @@ def test_read_network_counters_uses_os_aggregate(monkeypatch):
 
     monkeypatch.setattr("app.network.psutil.net_io_counters", fake_net_io_counters)
     assert read_network_counters() == NetworkCounters(12_345, 67_890)
+
+
+class FakeWebSocket:
+    def __init__(self, client):
+        self.client = client
+        self.messages = []
+
+    async def send(self, message):
+        self.messages.append(json.loads(message))
+        self.client.stop()
+
+
+def test_send_loop_sends_sampled_counters():
+    client = MonitorClient("ws://127.0.0.1:8000/ws/client", "TEST", "", 1, 1)
+    websocket = FakeWebSocket(client)
+    asyncio.run(client._send_loop(websocket))
+
+    assert len(websocket.messages) == 1
+    payload = websocket.messages[0]
+    assert payload["type"] == "heartbeat"
+    assert payload["rx_bytes"] > 0 or payload["tx_bytes"] > 0
