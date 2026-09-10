@@ -3,13 +3,11 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.identity import get_client_id
-from app.network import NetworkCounters
+from app.network import NetworkCounters, read_network_counters
 from app.websocket_client import MonitorClient
 
 
@@ -41,3 +39,17 @@ def test_persistent_identity(monkeypatch, tmp_path):
     assert first.startswith("CLIENT-")
     assert first == second
     assert identity_file.exists()
+
+
+def test_read_network_counters_uses_os_aggregate(monkeypatch):
+    class FakeCounters:
+        bytes_recv = 12_345
+        bytes_sent = 67_890
+
+    def fake_net_io_counters(*, pernic, nowrap):
+        assert pernic is False
+        assert nowrap is True
+        return FakeCounters()
+
+    monkeypatch.setattr("app.network.psutil.net_io_counters", fake_net_io_counters)
+    assert read_network_counters() == NetworkCounters(12_345, 67_890)
