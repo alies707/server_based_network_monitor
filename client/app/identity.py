@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import socket
 import uuid
@@ -11,16 +12,17 @@ IDENTITY_VERSION = 1
 
 
 def _identity_path() -> Path:
-    override = __import__("os").environ.get("NETWORK_MONITOR_IDENTITY_FILE")
+    override = os.environ.get("NETWORK_MONITOR_IDENTITY_FILE")
     if override:
         return Path(override).expanduser()
 
-    if platform.system() == "Windows":
-        base = Path(__import__("os").environ.get("APPDATA", Path.home()))
-    elif platform.system() == "Darwin":
+    system = platform.system()
+    if system == "Windows":
+        base = Path(os.environ.get("APPDATA", Path.home()))
+    elif system == "Darwin":
         base = Path.home() / "Library" / "Application Support"
     else:
-        base = Path(__import__("os").environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return base / "server_based_network_monitor" / "client_identity.json"
 
 
