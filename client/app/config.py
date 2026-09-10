@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -25,16 +26,23 @@ def parse_args() -> ClientConfig:
     parser.add_argument("--log-level", default=os.getenv("NETWORK_MONITOR_LOG_LEVEL", "INFO"))
     args = parser.parse_args()
 
-    if not args.server.startswith(("ws://", "wss://")):
-        parser.error("--server must start with ws:// or wss://")
+    parts = urlsplit(args.server)
+    if parts.scheme not in {"ws", "wss"} or not parts.netloc:
+        parser.error("--server must be a valid ws:// or wss:// URL")
     if args.interval <= 0:
         parser.error("--interval must be greater than zero")
     if args.reconnect_delay <= 0:
         parser.error("--reconnect-delay must be greater than zero")
+    if args.client_id is not None:
+        args.client_id = args.client_id.strip()
+        if not args.client_id:
+            parser.error("--client-id cannot be empty")
+        if len(args.client_id) > 128:
+            parser.error("--client-id must be 128 characters or fewer")
 
     return ClientConfig(
         server_url=args.server,
-        client_id=args.client_id.strip() if args.client_id else None,
+        client_id=args.client_id,
         token=args.token,
         interval=args.interval,
         reconnect_delay=args.reconnect_delay,
