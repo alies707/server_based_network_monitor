@@ -3,6 +3,7 @@ from __future__ import annotations
 import platform
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import psutil
 
@@ -28,22 +29,21 @@ VIRTUAL_PREFIXES = (
 )
 
 
-def _is_candidate(name: str, stats: psutil._common.snetio) -> bool:
+def _is_candidate(name: str, stats: Any) -> bool:
     lower = name.lower()
     if lower.startswith(VIRTUAL_PREFIXES):
         return False
     if getattr(stats, "isup", False) is False:
         return False
 
-    system = platform.system()
-    if system == "Windows":
+    if platform.system() == "Windows":
         virtual_markers = ("virtual", "loopback", "hyper-v", "vethernet", "vpn", "tunnel")
         return not any(marker in lower for marker in virtual_markers)
     return True
 
 
 def read_network_counters() -> NetworkCounters:
-    pernic = psutil.net_io_counters(pernic=True, nowrap=True)
+    pernic = psutil.net_io_counters(pernic=True, nowrap=True) or {}
     rx = 0
     tx = 0
     for name, counters in pernic.items():
@@ -54,11 +54,11 @@ def read_network_counters() -> NetworkCounters:
 
 
 def read_network_counters_with_retry(retries: int = 3) -> NetworkCounters:
-    last = NetworkCounters()
+    last = NetworkCounters(0, 0)
     for _ in range(max(1, retries)):
         try:
             return read_network_counters()
         except (OSError, RuntimeError):
-            last = NetworkCounters()
+            last = NetworkCounters(0, 0)
             time.sleep(0.1)
     return last
