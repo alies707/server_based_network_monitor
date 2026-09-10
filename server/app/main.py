@@ -14,6 +14,7 @@ WEB_DIR = BASE_DIR / "web"
 DB_PATH = Path(os.getenv("NETWORK_MONITOR_DB", str(BASE_DIR / "data" / "network_monitor.db")))
 STALE_SECONDS = float(os.getenv("NETWORK_MONITOR_STALE_SECONDS", "5"))
 TOKEN = os.getenv("NETWORK_MONITOR_TOKEN", "")
+MAX_COUNTER = (1 << 64) - 1
 
 clients = {}
 clients_lock = asyncio.Lock()
@@ -35,10 +36,17 @@ def init_db():
                 total_download_bytes INTEGER NOT NULL DEFAULT 0,
                 total_upload_bytes INTEGER NOT NULL DEFAULT 0,
                 public_ip TEXT NOT NULL DEFAULT '',
-                last_seen REAL NOT NULL DEFAULT 0
+                last_seen REAL NOT NULL DEFAULT 0,
+                last_rx_bytes INTEGER,
+                last_tx_bytes INTEGER
             )
             """
         )
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(clients)")}
+        if "last_rx_bytes" not in columns:
+            db.execute("ALTER TABLE clients ADD COLUMN last_rx_bytes INTEGER")
+        if "last_tx_bytes" not in columns:
+            db.execute("ALTER TABLE clients ADD COLUMN last_tx_bytes INTEGER")
         db.commit()
 
 
@@ -52,6 +60,8 @@ def load_persisted_clients():
             "total_download_bytes": int(row["total_download_bytes"]),
             "total_upload_bytes": int(row["total_upload_bytes"]),
             "last_seen": float(row["last_seen"]),
+            "last_rx_bytes": row["last_rx_bytes"],
+            "last_tx_bytes": row["last_tx_bytes"],
             "download_bps": 0.0,
             "upload_bps": 0.0,
             "previous_rx": None,
@@ -64,13 +74,18 @@ def save_client(client):
     with db_connect() as db:
         db.execute(
             """
-            INSERT INTO clients (client_id, total_download_bytes, total_upload_bytes, public_ip, last_seen)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO clients (
+                client_id, total_download_bytes, total_upload_bytes,
+                public_ip, last_seen, last_rx_bytes, last_tx_bytes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(client_id) DO UPDATE SET
                 total_download_bytes=excluded.total_download_bytes,
                 total_upload_bytes=excluded.total_upload_bytes,
                 public_ip=excluded.public_ip,
-                last_seen=excluded.last_seen
+                last_seen=excluded.last_seen,
+                last_rx_bytes=excluded.last_rx_bytes,
+                last_tx_bytes=excluded.last_tx_bytes
             """,
             (
                 client["client_id"],
@@ -78,6 +93,8 @@ def save_client(client):
                 client["total_upload_bytes"],
                 client["public_ip"],
                 client["last_seen"],
+                client["last_rx_bytes"],
+                client["last_tx_bytes"],
             ),
         )
         db.commit()
@@ -200,7 +217,7 @@ async def client_socket(websocket: WebSocket):
 
             rx_bytes = int(payload.get("rx_bytes", 0))
             tx_bytes = int(payload.get("tx_bytes", 0))
-            if rx_bytes < 0 or tx_bytes < 0:
+            if not (0 <= rx_bytes <= MAX_COUNTER and 0 <= tx_bytes <= MAX_COUNTER):
                 await websocket.close(code=1008, reason="Invalid counters")
                 return
 
@@ -214,6 +231,8 @@ async def client_socket(websocket: WebSocket):
                         "total_download_bytes": 0,
                         "total_upload_bytes": 0,
                         "last_seen": now,
+                        "last_rx_bytes": None,
+                        "last_tx_bytes": None,
                         "download_bps": 0.0,
                         "upload_bps": 0.0,
                         "previous_rx": None,
@@ -231,11 +250,24 @@ async def client_socket(websocket: WebSocket):
                         client["download_bps"] = 0.0
                         client["upload_bps"] = 0.0
 
-                if client["previous_rx"] is None or rx_bytes >= client["previous_rx"]:
+                if client["last_rx_bytes"] is None:
                     client["total_download_bytes"] = max(client["total_download_bytes"], rx_bytes)
-                if client["previous_tx"] is None or tx_bytes >= client["previous_tx"]:
-                    client["total_upload_bytes"] = max(client["total_upload_bytes"], tx_bytes)
+                elif rx_bytes >= client["last_rx_bytes"]:
+                    client["total_download_bytes"] += rx_bytes - client["last_rx_bytes"]
+                else:
+                    // Counter reset/reboot: count the new counter value from zero.
+                    client["total_download_bytes"] += rx_bytes
 
+                if client["last_tx_bytes"] is None:
+                    client["total_upload_bytes"] = max(client["total_upload_bytes"], tx_bytes)
+                elif tx_bytes >= client["last_tx_bytes"]:
+                    client["total_upload_bytes"] += tx_bytes - client["last_tx_bytes"]
+                else:
+                    // Counter reset/reboot: count the new counter value from zero.
+                    client["total_upload_bytes"] += tx_bytes
+
+                client["last_rx_bytes"] = rx_bytes
+                client["last_tx_bytes"] = tx_bytes
                 client["previous_rx"] = rx_bytes
                 client["previous_tx"] = tx_bytes
                 client["previous_time"] = now
@@ -247,6 +279,8 @@ async def client_socket(websocket: WebSocket):
                     "total_upload_bytes": client["total_upload_bytes"],
                     "public_ip": client["public_ip"],
                     "last_seen": client["last_seen"],
+                    "last_rx_bytes": client["last_rx_bytes"],
+                    "last_tx_bytes": client["last_tx_bytes"],
                 }
 
             await asyncio.to_thread(save_client, persisted_client)
