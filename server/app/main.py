@@ -21,7 +21,7 @@ clients_lock = asyncio.Lock()
 
 def db_connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -227,6 +227,9 @@ async def client_socket(websocket: WebSocket):
                     if elapsed > 0 and rx_bytes >= client["previous_rx"] and tx_bytes >= client["previous_tx"]:
                         client["download_bps"] = (rx_bytes - client["previous_rx"]) * 8 / elapsed
                         client["upload_bps"] = (tx_bytes - client["previous_tx"]) * 8 / elapsed
+                    else:
+                        client["download_bps"] = 0.0
+                        client["upload_bps"] = 0.0
 
                 if client["previous_rx"] is None or rx_bytes >= client["previous_rx"]:
                     client["total_download_bytes"] = max(client["total_download_bytes"], rx_bytes)
@@ -246,7 +249,7 @@ async def client_socket(websocket: WebSocket):
                     "last_seen": client["last_seen"],
                 }
 
-            save_client(persisted_client)
+            await asyncio.to_thread(save_client, persisted_client)
             await hub.broadcast(await snapshot())
     except WebSocketDisconnect:
         return
