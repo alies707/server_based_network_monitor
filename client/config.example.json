@@ -1,0 +1,8 @@
+{
+  "server_url": "ws://192.168.1.100:8000/ws/client",
+  "client_id": null,
+  "token": "",
+  "interval": 1.0,
+  "reconnect_delay": 3.0,
+  "log_level": "INFO"
+}
