@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import websockets
-from websockets.asyncio.client import ClientConnection, connect
 
-from .network import NetworkCounters
+from .network import NetworkCounters, read_network_counters_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,14 @@ class MonitorClient:
                 "type": "heartbeat",
                 "protocol_version": 1,
                 "client_id": client_id,
-                "timestamp": __import__("time").time(),
+                "timestamp": time.time(),
                 "rx_bytes": counters.rx_bytes,
                 "tx_bytes": counters.tx_bytes,
             },
             separators=(",", ":"),
         )
 
-    async def _send_loop(self, websocket: ClientConnection) -> None:
-        from .network import read_network_counters_with_retry
-
+    async def _send_loop(self, websocket) -> None:
         while not self._stop_event.is_set():
             counters = read_network_counters_with_retry()
             await websocket.send(self._payload(self.client_id, counters))
@@ -63,7 +61,7 @@ class MonitorClient:
         while not self._stop_event.is_set():
             try:
                 logger.info("Connecting to %s as %s", url.split("?", 1)[0], self.client_id)
-                async with connect(
+                async with websockets.connect(
                     url,
                     open_timeout=10,
                     ping_interval=20,
