@@ -19,7 +19,7 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
 
-      - name: Install dependencies
+      - name: Install server dependencies
         run: python -m pip install -r server/requirements.txt
 
       - name: Run server tests
@@ -27,17 +27,24 @@ jobs:
           PYTHONPATH: server
         run: python -m pytest -q server/tests
 
-  client-build:
+  client-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential git
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: client/requirements.txt
 
-      - name: Configure client
-        run: cmake -S client -B client/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Install client dependencies
+        run: python -m pip install -r client/requirements.txt pytest
 
-      - name: Build client
-        run: cmake --build client/build --parallel
+      - name: Run client tests
+        run: python -m pytest -q client/tests
+
+      - name: Compile client package
+        run: python -m compileall -q client/app
