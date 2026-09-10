@@ -7,6 +7,7 @@ import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import websockets
+from websockets.asyncio.client import ClientConnection, connect
 
 from .network import NetworkCounters, read_network_counters_with_retry
 
@@ -47,7 +48,7 @@ class MonitorClient:
             separators=(",", ":"),
         )
 
-    async def _send_loop(self, websocket) -> None:
+    async def _send_loop(self, websocket: ClientConnection) -> None:
         while not self._stop_event.is_set():
             counters = read_network_counters_with_retry()
             await websocket.send(self._payload(self.client_id, counters))
@@ -61,7 +62,7 @@ class MonitorClient:
         while not self._stop_event.is_set():
             try:
                 logger.info("Connecting to %s as %s", url.split("?", 1)[0], self.client_id)
-                async with websockets.connect(
+                async with connect(
                     url,
                     open_timeout=10,
                     ping_interval=20,
