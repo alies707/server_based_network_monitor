@@ -238,8 +238,15 @@ async def client_socket(websocket: WebSocket):
                 client["previous_time"] = now
                 client["last_seen"] = now
                 client["public_ip"] = remote_ip
-                save_client(client)
+                persisted_client = {
+                    "client_id": client["client_id"],
+                    "total_download_bytes": client["total_download_bytes"],
+                    "total_upload_bytes": client["total_upload_bytes"],
+                    "public_ip": client["public_ip"],
+                    "last_seen": client["last_seen"],
+                }
 
+            save_client(persisted_client)
             await hub.broadcast(await snapshot())
     except WebSocketDisconnect:
         return
