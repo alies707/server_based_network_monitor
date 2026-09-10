@@ -1,16 +1,21 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, clients
+from app import main
 
 
-def setup_function():
-    clients.clear()
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path):
+    main.DB_PATH = tmp_path / "network_monitor_test.db"
+    main.clients.clear()
+    yield
+    main.clients.clear()
 
 
 def test_health_endpoint():
-    with TestClient(app) as client:
+    with TestClient(main.app) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
@@ -19,7 +24,7 @@ def test_health_endpoint():
 
 
 def test_client_heartbeat_and_dashboard_snapshot():
-    with TestClient(app) as client:
+    with TestClient(main.app) as client:
         with client.websocket_connect("/ws/client") as client_ws:
             client_ws.send_text(
                 json.dumps(
@@ -47,7 +52,7 @@ def test_client_heartbeat_and_dashboard_snapshot():
 
 
 def test_invalid_counters_close_client_socket():
-    with TestClient(app) as client:
+    with TestClient(main.app) as client:
         with client.websocket_connect("/ws/client") as client_ws:
             client_ws.send_text(
                 json.dumps(
